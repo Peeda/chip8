@@ -40,12 +40,13 @@ pub struct Chip8 {
     i_reg:u16,
     v_reg:[u8;REGISTERS],
     stack:Vec<u16>,
-    delay_timer:u8,
-    sound_timer:u8,
+    pub delay_timer:u8,
+    pub sound_timer:u8,
     pub file_loaded:bool,
     pub input_data:[bool;16],
     pub prev_input_data:[bool;16],
     quirks:[bool;13],
+    pub screen_updated:bool,
 }
 impl Default for Chip8 {
     fn default() -> Chip8 {
@@ -67,6 +68,7 @@ impl Chip8 {
             input_data:[false;16],
             prev_input_data:[false;16],
             quirks:[false;13],
+            screen_updated:false,
         };
         for (i,font_byte) in FONT_DATA.iter().enumerate() {
             chip8.ram[FONT_START + i] = *font_byte;
@@ -93,6 +95,7 @@ impl Chip8 {
         } else {println!("tried to read file after load")}
     }
     pub fn step(&mut self) {
+        self.screen_updated = false;
         let higher_byte:u16 = self.ram[self.pc as usize] as u16;
         let lower_byte:u16 = self.ram[(self.pc + 1) as usize] as u16;
         let opcode:u16 = higher_byte << 8 | lower_byte;
@@ -211,14 +214,16 @@ impl Chip8 {
                         }
                     }
                 }
+                self.screen_updated = true;
             }
             (0xE,_,9,0xE) => if self.input_data[self.v_reg[x] as usize] {self.pc += 2},
             (0xE,_,0xA,1) => if !self.input_data[self.v_reg[x] as usize] {self.pc += 2},
             (0xF,_,0,7) => self.v_reg[x] = self.delay_timer,
             (0xF,_,0,0xA) => {
+                //this one activates on release
                 let mut keycode:Option<u8> = None;
                 for (ind,held) in self.input_data.iter().enumerate() {
-                    if !self.prev_input_data[ind] && *held {
+                    if self.prev_input_data[ind] && !(*held) {
                         keycode = Some(ind.try_into().expect("keycode > 15"));
                     }
                 }
@@ -260,6 +265,14 @@ impl Chip8 {
                 }
             }
             _ => println!("unimplemented opcode {:#06X}", opcode),
+        }
+    }
+    pub fn decrement_timers(&mut self) {
+        if self.delay_timer > 0 {
+            self.delay_timer -= 1;
+        }
+        if self.sound_timer > 0 { 
+            self.sound_timer -= 1;
         }
     }
 }
