@@ -1,4 +1,5 @@
 use crate::chip8::Chip8;
+use crate::chip8::Version;
 
 use std::thread;
 
@@ -8,9 +9,13 @@ use sdl2::keyboard::Keycode;
 use std::time::{Instant,Duration};
 
 const SCALE:u32 = 20;
-const INSTRUCTIONS_PER_SEC:u16 = 600;
+const ONCOLOR:(u8,u8,u8) = (255,100,100);
+const OFFCOLOR:(u8,u8,u8) = (0,0,0);
 pub fn run() {
-    let mut chip8 = Chip8::default();
+    // let mut chip8 = Chip8::default();
+    // let mut chip8 = Chip8::new(Version::Original);
+    let mut chip8 = Chip8::new(Version::Schip);
+    // let mut chip8 = Chip8::new(Version::XoChip);
 
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
@@ -25,6 +30,8 @@ pub fn run() {
     let mut color_buffer = [0_u8; 3 * 64 * 32];
     let mut event_pump = sdl_context.event_pump().unwrap();
     let mut frame_count = 0;
+    canvas.copy(&texture,None,None).unwrap();
+    canvas.present();
     'running: loop {
         let start = Instant::now();
         let input_result = handle_input(&mut event_pump,&mut chip8);
@@ -42,16 +49,16 @@ pub fn run() {
         if chip8.screen_updated || input_result.1 {
             for i in 0..64*32 {
                 let rgb_triplet = if chip8.screen_state[i] {
-                    (255,100,100)
+                    ONCOLOR
                 } else {
-                    (0,0,0)
+                    OFFCOLOR
                 };
                 (color_buffer[i*3],color_buffer[i*3+1],color_buffer[i*3+2]) = rgb_triplet;
             }
             texture.update(None, &color_buffer, 3 * 64).expect("Failed texture update");
+            canvas.copy(&texture,None,None).unwrap();
+            canvas.present();
         }
-        canvas.copy(&texture,None,None).unwrap();
-        canvas.present();
         let elapsed = start.elapsed();
         let wait = Duration::new(0,1_666_667).checked_sub(elapsed);
         if let Some(dur) = wait {

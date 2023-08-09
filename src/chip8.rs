@@ -28,6 +28,7 @@ const FONT_DATA:[u8;16*5] = [
 ];
 const PROGRAM_START:usize = 0x200;
 const FONT_START:usize = 0x050;
+#[derive(PartialEq)]
 pub enum Version {
     Original,
     Schip,
@@ -45,8 +46,8 @@ pub struct Chip8 {
     pub file_loaded:bool,
     pub input_data:[bool;16],
     pub prev_input_data:[bool;16],
-    quirks:[bool;13],
     pub screen_updated:bool,
+    version:Version,
 }
 impl Default for Chip8 {
     fn default() -> Chip8 {
@@ -67,19 +68,11 @@ impl Chip8 {
             file_loaded:false,
             input_data:[false;16],
             prev_input_data:[false;16],
-            quirks:[false;13],
+            version,
             screen_updated:false,
         };
         for (i,font_byte) in FONT_DATA.iter().enumerate() {
             chip8.ram[FONT_START + i] = *font_byte;
-        }
-        let indices = match version {
-            Version::Original => vec![4,8],
-            Version::Schip => vec![5,9,11],
-            Version::XoChip => vec![6]
-        };
-        for index in indices {
-            chip8.quirks[index] = true;
         }
         chip8
     }
@@ -132,16 +125,18 @@ impl Chip8 {
                     3 => self.v_reg[x] ^= self.v_reg[y],
                     _ => ()
                 }
-                if self.quirks[4] {self.v_reg[0xF_usize] = 0};
+                if self.version == Version::Original {
+                    self.v_reg[0xF_usize] = 0
+                }
             }
             (8,_,_,4) => {
-                let sum = self.v_reg[x].wrapping_add(self.v_reg[y]);
-                if sum < self.v_reg[x] {
+                let (sum,overflow) = self.v_reg[x].overflowing_add(self.v_reg[y]);
+                self.v_reg[x] = sum;
+                if overflow {
                     self.v_reg[0xF_usize] = 1;
                 } else {
                     self.v_reg[0xF_usize] = 0;
                 }
-                self.v_reg[x] = sum;
             }
             (8,_,_,5 | 7) => {
                 let mut first = self.v_reg[x];
@@ -149,26 +144,33 @@ impl Chip8 {
                 if nibbles.3 == 7 {
                     mem::swap(&mut first, &mut second);
                 }
-                let sub = first.wrapping_sub(second);
-                if sub > first {
-                    self.v_reg[0xF_usize] = 1;
-                } else {
+                let (difference,underflow) = first.overflowing_sub(second);
+                self.v_reg[x] = difference;
+                if underflow {
                     self.v_reg[0xF_usize] = 0;
+                } else {
+                    self.v_reg[0xF_usize] = 1;
                 }
-                self.v_reg[x] = sub;
             }
             (8,_,_,6 | 0xE) => {
-                if !self.quirks[5] {
-                    self.v_reg[x] = self.v_reg[y];
+                match self.version {
+                    Version::Original | Version::XoChip => self.v_reg[x] = self.v_reg[y],
+                    Version::Schip => (),
                 }
                 match nibbles.3 {
                     6 => {
-                        self.v_reg[0xF_usize] = self.v_reg[x] & 1;
+                        let temp = self.v_reg[x] & 1;
                         self.v_reg[x] >>= 1;
+                        self.v_reg[0xF_usize] = temp;
                     }
                     0xE => {
-                        self.v_reg[0xF_usize] = self.v_reg[x] & (1 << 7);
+                        let temp = if self.v_reg[x] & (1 << 7) > 0 {
+                            1
+                        } else {
+                            0
+                        };
                         self.v_reg[x] <<= 1;
+                        self.v_reg[0xF_usize] = temp;
                     }
                     _ => ()
                 }
@@ -176,14 +178,11 @@ impl Chip8 {
             (9,_,_,0) => if self.v_reg[x] != self.v_reg[y] {self.pc += 2}
             (0xA,_,_,_) => self.i_reg = nnn,
             (0xB,_,_,_) => {
-                let temp = true;
-                if temp {
-                    /* BNNN instruction */
-                    self.pc = nnn + self.v_reg[0] as u16;
-                } else {
-                    /* BXNN insruction */
-                    self.pc = nnn + self.v_reg[x] as u16;
-                }
+                let add:u16 = match self.version {
+                    Version::Original | Version::XoChip => self.v_reg[0] as u16,
+                    Version::Schip => self.v_reg[x] as u16,
+                };
+                self.pc = nnn + add;
             }
             (0xC,_,_,_) => {
                 let mut rng = rand::thread_rng();
@@ -260,8 +259,9 @@ impl Chip8 {
                         self.v_reg[i] = self.ram[self.i_reg as usize + i];
                     }
                 }
-                if self.quirks[11] {
-                    self.i_reg += (x+1) as u16;
+                match self.version {
+                    Version::Original | Version::XoChip => self.i_reg += (x+1) as u16,
+                    Version::Schip => (),
                 }
             }
             _ => println!("unimplemented opcode {:#06X}", opcode),
@@ -310,25 +310,6 @@ mod tests {
             assert_eq!(hard_coded.ram[i],from_file.ram[i]);
         }
     }
-    #[test]
-    fn test_quirk_assignment_original() {
-        let chip8 = Chip8::new(Version::Original);
-        assert!(chip8.quirks[4]);
-        assert!(chip8.quirks[8]);
-    }
-    #[test]
-    fn test_quirk_assignment_schip() {
-        let chip8 = Chip8::new(Version::Schip);
-        assert!(chip8.quirks[5]);
-        assert!(chip8.quirks[9]);
-        assert!(chip8.quirks[11]);
-    }
-    #[test]
-    fn test_quirk_assignment_xo() {
-        let chip8 = Chip8::new(Version::XoChip);
-        assert!(chip8.quirks[6]);
-    }
-    #[test]
     fn test_font_data() {
         for i in 0..16 {
             let mut chip8 = Chip8::default();
