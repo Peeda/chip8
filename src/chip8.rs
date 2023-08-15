@@ -310,6 +310,7 @@ mod tests {
             assert_eq!(hard_coded.ram[i],from_file.ram[i]);
         }
     }
+    #[test]
     fn test_font_data() {
         for i in 0..16 {
             let mut chip8 = Chip8::default();
